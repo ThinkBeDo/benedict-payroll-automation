@@ -18,10 +18,18 @@
     "type": "git",
     "url": "https://github.com/ThinkBeDo/benedict-payroll-automation.git"
   },
-  "keywords": ["payroll", "automation", "pdf", "processing"],
+  "keywords": [
+    "payroll",
+    "automation",
+    "pdf",
+    "processing"
+  ],
   "author": "Tyler LaFleur",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.0"
+  },
+  "dependencies": {
+    "pdf-parse": "^1.1.1"
   }
 }

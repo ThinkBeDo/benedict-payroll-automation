@@ -41,6 +41,11 @@ class PDFParser {
         // Skip empty lines
         if (!trimmedLine) continue;
         
+        // Debug logging for analyzing format
+        if (i < 50 && trimmedLine.length > 0) {
+          console.log(`Line ${i}: [${trimmedLine.substring(0, 100)}]`);
+        }
+        
         // Extract pay period ID
         if (trimmedLine.includes('Pay Period Id:')) {
           const match = trimmedLine.match(/Pay Period Id:\s*([^\s]+)/);
@@ -61,8 +66,10 @@ class PDFParser {
         
         // Check for employee header - more flexible pattern
         // Matches: "FirstName LastName - 12345" or "LastName, FirstName - 12345"
-        const employeeMatch = trimmedLine.match(/^([A-Za-z',.\s-]+?)\s*-\s*(\d+)\s*$/);
-        if (employeeMatch) {
+        // Updated to handle spacing and any trailing text after ID
+        const employeeMatch = trimmedLine.match(/^([A-Za-z',.\s-]+?)\s+-\s+(\d+)/);
+        if (employeeMatch && !trimmedLine.includes('Date') && !trimmedLine.includes('Hours')) {
+          console.log(`DEBUG: Matched employee line: "${trimmedLine}"`);
           // Save previous employee's entries if exists
           if (currentEmployee && employeeEntries.length > 0) {
             console.log(`  Saving ${employeeEntries.length} entries for ${currentEmployee.name}`);
@@ -90,15 +97,65 @@ class PDFParser {
         }
         
         // Parse time entries for current employee
+        // Handle multi-line format where job code, date, hours, and details are on separate lines
         if (currentEmployee) {
-          // Look for lines that contain time entry data
-          // Must have a date (MM/DD/YYYY format) and hours
-          const dateMatch = trimmedLine.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+          // Check if this line starts with a job code (parentheses format)
+          const jobCodeMatch = trimmedLine.match(/^\(([A-Z][^)]*)\)(.*)$/) || trimmedLine.match(/^([A-Z]+)\)(.*)$/);
           
-          if (dateMatch && !trimmedLine.includes('Employee Totals') && !trimmedLine.includes('Report Totals')) {
-            const entry = this.parseTimeEntry(trimmedLine, dateMatch[1]);
-            if (entry) {
-              employeeEntries.push(entry);
+          if (jobCodeMatch) {
+            // This is the start of a time entry
+            // Next lines should be: date, hours, details
+            const jobCode = jobCodeMatch[1];
+            const jobDescription = (jobCodeMatch[2] || '').trim();
+            
+            // Look ahead for date, hours, and details
+            if (i + 3 < lines.length) {
+              const nextLine1 = lines[i + 1].trim(); // Should be date
+              const nextLine2 = lines[i + 2].trim(); // Should be hours
+              const nextLine3 = lines[i + 3].trim(); // Should be details with dashes
+              
+              const dateMatch = nextLine1.match(/^(\d{1,2}\/\d{1,2}\/\d{4})$/);
+              const hoursMatch = nextLine2.match(/^(\d+(?:\.\d+)?)\s*$/);
+              
+              if (dateMatch && hoursMatch && nextLine3.includes(' - ')) {
+                const date = dateMatch[1];
+                const hours = parseFloat(hoursMatch[1]);
+                
+                // Parse the dash-separated fields
+                const dashParts = nextLine3.split(' - ').map(p => p.trim());
+                const payType = dashParts[0] || 'Regular';
+                const laborRate = dashParts[1] || 'Tech';
+                const costCode = dashParts[2] || 'SERVICE';
+                const costCategory = dashParts[3] || 'DirLab';
+                const description = dashParts[4] || '';
+                
+                const entry = {
+                  jobCode,
+                  jobDescription,
+                  date,
+                  hours,
+                  payType,
+                  laborRate,
+                  costCode,
+                  costCategory,
+                  description,
+                  originalLine: `${trimmedLine} ${nextLine1} ${nextLine2} ${nextLine3}`
+                };
+                
+                employeeEntries.push(entry);
+                console.log(`  Added entry for ${currentEmployee.name}: ${date} - ${hours} hours`);
+                
+                // Skip the lines we just processed
+                i += 3;
+                
+                // Sometimes there's a "Source" and "Labor" line after, skip those too
+                if (i + 1 < lines.length && (lines[i + 1].trim() === 'Source' || lines[i + 1].trim().startsWith('Labor'))) {
+                  i++;
+                }
+                if (i + 1 < lines.length && lines[i + 1].trim().match(/^\d+$/)) {
+                  i++; // Skip numeric line
+                }
+              }
             }
           }
         }
@@ -177,6 +234,8 @@ class PDFParser {
    */
   parseTimeEntry(line, dateStr) {
     try {
+      console.log(`    parseTimeEntry input: "${line}"`);
+      
       // Skip if no date provided
       if (!dateStr) return null;
       
@@ -194,66 +253,73 @@ class PDFParser {
       const jobCodeMatch = line.match(/^\(([^)]+)\)/);
       if (jobCodeMatch) {
         jobCode = jobCodeMatch[1];
+        console.log(`      Found job code: ${jobCode}`);
       }
       
-      // Extract hours - look for decimal numbers
-      // Hours usually appear after the date
-      const afterDate = line.substring(line.indexOf(dateStr) + dateStr.length);
-      const hoursMatch = afterDate.match(/^\s*(\d+\.?\d*)/);
-      if (hoursMatch) {
-        hours = parseFloat(hoursMatch[1]);
-      } else {
-        // Try to find hours anywhere in the line
-        const anyHoursMatch = line.match(/\b(\d+\.\d{2})\b/);
-        if (anyHoursMatch) {
-          hours = parseFloat(anyHoursMatch[1]);
+      // Extract hours - look for decimal numbers after the date
+      // Format: (JOBCODE)DESCRIPTION DATE HOURS - PayType - LaborRate - CostCode - CostCategory - Description
+      const dateIndex = line.indexOf(dateStr);
+      if (dateIndex !== -1) {
+        const afterDate = line.substring(dateIndex + dateStr.length);
+        // Match hours which can be like "1.25" or "10.00" or "1.00"
+        const hoursMatch = afterDate.match(/^\s+(\d+(?:\.\d+)?)\s/);
+        if (hoursMatch) {
+          hours = parseFloat(hoursMatch[1]);
+          console.log(`      Found hours: ${hours}`);
         }
       }
       
-      // Extract pay type
-      const payTypes = ['Regular', 'Overtime', 'Double Time', 'Call', 'Unapplied', 'OTClearing'];
-      for (const type of payTypes) {
-        if (line.includes(type)) {
-          payType = type;
-          break;
+      // Parse the dash-separated fields after the hours
+      // Format: HOURS - PayType - LaborRate - CostCode - CostCategory - Description
+      const dashParts = line.split(' - ');
+      console.log(`      Dash parts count: ${dashParts.length}`);
+      
+      if (dashParts.length >= 2) {
+        // Find which part contains the hours to know where we are in the format
+        let startIndex = -1;
+        for (let i = 0; i < dashParts.length; i++) {
+          if (dashParts[i].includes(dateStr) && i < dashParts.length - 1) {
+            // The part after the one with date should have paytype
+            startIndex = i + 1;
+            break;
+          }
         }
-      }
-      
-      // Extract labor rate
-      const laborRates = [
-        'TechOT', 'TechNB', 'Tech', 'PMTECH', 'MN PMTECH', 'MNTech', 
-        'SCH_MNTECH', 'SCH_TECH', 'SCHTECHNB', 'SCH_PMTECH', 'SCH_MN PMTECH',
-        'WN MN TECH', 'WN TECH', 'WN TECHNB', 'WN MN PM TECH', 'WN PM TECH',
-        'PREM', 'SHOP', 'MN PMTECH', 'Sch MN PM Tech'
-      ];
-      
-      // Sort by length descending to match longer rates first
-      laborRates.sort((a, b) => b.length - a.length);
-      
-      for (const rate of laborRates) {
-        if (line.includes(rate)) {
-          laborRate = rate;
-          break;
-        }
-      }
-      
-      // Extract cost code
-      const costCodes = ['SERVICE', 'INSTALL', 'PM', 'PMF', 'FTPM', 'SHMTL', 'RETAIL'];
-      for (const code of costCodes) {
-        // Use word boundary to avoid partial matches
-        const regex = new RegExp(`\\b${code}\\b`);
-        if (regex.test(line)) {
-          costCode = code;
-          break;
-        }
-      }
-      
-      // Extract cost category
-      const categories = ['DirLab', 'TechUnapplyd', 'TechUnapplied', 'Office', 'CLEARING'];
-      for (const cat of categories) {
-        if (line.includes(cat)) {
-          costCategory = cat === 'TechUnapplied' ? 'TechUnapplyd' : cat;
-          break;
+        
+        if (startIndex > 0 && startIndex < dashParts.length) {
+          // PayType is usually the first field after hours
+          const payTypeStr = dashParts[startIndex].trim();
+          const payTypes = ['Regular', 'Overtime', 'Double Time', 'Call', 'Unapplied', 'OTClearing'];
+          for (const type of payTypes) {
+            if (payTypeStr.includes(type)) {
+              payType = type;
+              console.log(`      Found payType: ${payType}`);
+              break;
+            }
+          }
+          
+          // Labor Rate is next
+          if (startIndex + 1 < dashParts.length) {
+            laborRate = dashParts[startIndex + 1].trim();
+            console.log(`      Found laborRate: ${laborRate}`);
+          }
+          
+          // Cost Code is next
+          if (startIndex + 2 < dashParts.length) {
+            costCode = dashParts[startIndex + 2].trim();
+            console.log(`      Found costCode: ${costCode}`);
+          }
+          
+          // Cost Category is next
+          if (startIndex + 3 < dashParts.length) {
+            costCategory = dashParts[startIndex + 3].trim();
+            console.log(`      Found costCategory: ${costCategory}`);
+          }
+          
+          // Description is last
+          if (startIndex + 4 < dashParts.length) {
+            description = dashParts[startIndex + 4].trim();
+            console.log(`      Found description: ${description}`);
+          }
         }
       }
       
@@ -262,17 +328,12 @@ class PDFParser {
         const afterJobCode = line.substring(jobCodeMatch[0].length);
         const beforeDate = afterJobCode.split(dateStr)[0];
         jobDescription = beforeDate.trim();
-      }
-      
-      // Get description (usually last part after all the dashes)
-      const parts = line.split(' - ');
-      if (parts.length > 1) {
-        description = parts[parts.length - 1].trim();
+        console.log(`      Found job description: ${jobDescription}`);
       }
       
       // Only return if we have valid hours
       if (hours > 0) {
-        return {
+        const result = {
           jobCode,
           jobDescription,
           date: dateStr,
@@ -284,8 +345,11 @@ class PDFParser {
           description,
           originalLine: line.trim()
         };
+        console.log(`      PARSED ENTRY:`, JSON.stringify(result, null, 2));
+        return result;
       }
       
+      console.log(`      No hours found, returning null`);
       return null;
       
     } catch (error) {

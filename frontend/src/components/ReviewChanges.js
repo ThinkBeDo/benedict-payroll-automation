@@ -1,20 +1,24 @@
 import React, { useState, useMemo } from 'react';
 
-const ReviewChanges = ({ changes, onApprove, onReject }) => {
+const ReviewChanges = ({ changes = [], onApprove, onReject }) => {
   const [sortField, setSortField] = useState('employeeName');
   const [sortDirection, setSortDirection] = useState('asc');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRule, setFilterRule] = useState('all');
 
+  // Ensure changes is an array
+  const safeChanges = Array.isArray(changes) ? changes : [];
+
   // Get unique rules for filter dropdown
   const uniqueRules = useMemo(() => {
-    const rules = [...new Set(changes.map(change => change.rule))];
+    if (safeChanges.length === 0) return [];
+    const rules = [...new Set(safeChanges.map(change => change.rule))];
     return rules.sort();
-  }, [changes]);
+  }, [safeChanges]);
 
   // Filter and sort changes
   const filteredAndSortedChanges = useMemo(() => {
-    let filtered = changes;
+    let filtered = safeChanges;
 
     // Apply search filter
     if (searchTerm) {
@@ -49,7 +53,7 @@ const ReviewChanges = ({ changes, onApprove, onReject }) => {
     });
 
     return filtered;
-  }, [changes, searchTerm, filterRule, sortField, sortDirection]);
+  }, [safeChanges, searchTerm, filterRule, sortField, sortDirection]);
 
   const handleSort = (field) => {
     if (sortField === field) {

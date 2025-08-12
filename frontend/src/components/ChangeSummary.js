@@ -1,17 +1,22 @@
 import React, { useMemo } from 'react';
 
-const ChangeSummary = ({ changes, originalData, fileName }) => {
+const ChangeSummary = ({ changes = [], originalData = [], fileName }) => {
   const summary = useMemo(() => {
+    // Ensure changes is an array
+    const safeChanges = Array.isArray(changes) ? changes : [];
+    
     const stats = {
-      totalChanges: changes.length,
+      totalChanges: safeChanges.length,
       changesByRule: {},
       changesByEmployee: {},
       changesByField: {},
       totalEmployees: originalData ? originalData.length : 0,
-      employeesAffected: [...new Set(changes.map(change => change.employeeName))].length
+      employeesAffected: safeChanges.length > 0 
+        ? [...new Set(safeChanges.map(change => change.employeeName))].length 
+        : 0
     };
 
-    changes.forEach(change => {
+    safeChanges.forEach(change => {
       // Count by rule
       if (!stats.changesByRule[change.rule]) {
         stats.changesByRule[change.rule] = 0;

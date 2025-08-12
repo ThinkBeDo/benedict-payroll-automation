@@ -29,10 +29,15 @@ function App() {
       // Process PDF using payroll service
       const result = await payrollService.processPDF(file);
       
+      // Extract data from nested structure
+      const originalData = result.data?.original || [];
+      const changesData = result.data?.changes || [];
+      const corrected = result.data?.corrected || [];
+      
       setUploadedFile(file);
-      setParsedData(result.employeeData);
-      setChanges(result.changes);
-      setCorrectedData(result.correctedData);
+      setParsedData(originalData);
+      setChanges(changesData);
+      setCorrectedData(corrected);
       setCurrentStep('review');
       
     } catch (err) {

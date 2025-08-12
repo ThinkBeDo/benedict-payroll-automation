@@ -8,6 +8,9 @@ const payrollRoutes = require('./routes/payroll');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy for Railway deployment
+app.set('trust proxy', true);
+
 // Security middleware with custom CSP for production
 if (process.env.NODE_ENV === 'production') {
   app.use(helmet({

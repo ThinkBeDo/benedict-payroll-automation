@@ -12,7 +12,7 @@ class PayrollService {
   async processPDF(file) {
     try {
       const formData = new FormData();
-      formData.append('pdf', file);
+      formData.append('payrollPdf', file);
 
       const response = await api.post('/payroll/process', formData, {
         headers: {

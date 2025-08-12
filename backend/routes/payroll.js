@@ -24,25 +24,60 @@ const upload = multer({
 // Process payroll PDF
 router.post('/process', upload.single('payrollPdf'), async (req, res) => {
   try {
+    // Log request details
+    console.log('Received upload request');
+    console.log('File present:', !!req.file);
+    
     if (!req.file) {
+      console.error('No file in request');
       return res.status(400).json({
-        error: 'No PDF file uploaded'
+        error: 'No PDF file uploaded',
+        details: 'File field "payrollPdf" is required'
       });
     }
 
-    console.log('Processing PDF:', req.file.originalname);
+    console.log('Processing PDF:', req.file.originalname, 'Size:', req.file.size);
 
     // Step 1: Extract text from PDF
-    const extractedText = await pdfParser.extractText(req.file.buffer);
-    console.log('Text extracted, length:', extractedText.length);
+    let extractedText;
+    try {
+      extractedText = await pdfParser.extractText(req.file.buffer);
+      console.log('Text extracted successfully, length:', extractedText.length);
+    } catch (extractError) {
+      console.error('PDF extraction failed:', extractError);
+      return res.status(422).json({
+        error: 'Failed to extract text from PDF',
+        details: extractError.message
+      });
+    }
 
     // Step 2: Parse employee data from text
-    const employeeData = await pdfParser.parseEmployeeData(extractedText);
-    console.log('Parsed employee entries:', employeeData.length);
+    let employeeData;
+    try {
+      employeeData = await pdfParser.parseEmployeeData(extractedText);
+      console.log('Parsed employee entries:', employeeData.length);
+    } catch (parseError) {
+      console.error('Data parsing failed:', parseError);
+      return res.status(422).json({
+        error: 'Failed to parse payroll data',
+        details: parseError.message
+      });
+    }
 
     // Step 3: Apply business rules and track changes
-    const { correctedData, changes } = await ruleEngine.applyRules(employeeData);
-    console.log('Rules applied, changes made:', changes.length);
+    let correctedData, changes;
+    try {
+      const result = await ruleEngine.applyRules(employeeData);
+      correctedData = result.correctedData;
+      changes = result.changes;
+      console.log('Rules applied successfully, changes made:', changes.length);
+    } catch (ruleError) {
+      console.error('Rule application failed:', ruleError);
+      return res.status(500).json({
+        error: 'Failed to apply business rules',
+        details: ruleError.message
+      });
+    }
 
     // Return processed data and changes for review
     res.json({
@@ -62,10 +97,18 @@ router.post('/process', upload.single('payrollPdf'), async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error processing payroll PDF:', error);
+    console.error('Unexpected error processing payroll PDF:', error);
+    console.error('Stack trace:', error.stack);
+    
+    // Don't expose internal errors in production
+    const message = process.env.NODE_ENV === 'production' 
+      ? 'An error occurred while processing the PDF' 
+      : error.message;
+    
     res.status(500).json({
       error: 'Failed to process PDF',
-      message: error.message
+      message: message,
+      details: process.env.NODE_ENV !== 'production' ? error.stack : undefined
     });
   }
 });

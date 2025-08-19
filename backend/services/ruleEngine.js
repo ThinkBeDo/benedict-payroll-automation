@@ -13,6 +13,17 @@ class RuleEngine {
       'MN PMTECH', 'PMTECH', 'TechNB', 'Sch MN PM Tech', 
       'SCH_MN PMTECH', 'SCH_PMTECH', 'WN MN PM TECH', 'WN PM TECH'
     ];
+
+    // NEW: Office cost codes for Rule 7
+    this.OFFICE_COST_CODES = ['1COAD', '1SCHOF', '1WNOF'];
+
+    // NEW: Call work labor rates for enhanced Rule 5
+    this.CALL_LABOR_RATES = {
+      // Overtime variants
+      OT: ['TechOT', 'SCH_MNTECHOT', 'WN MN TECHOT'],
+      // No Bill variants  
+      NB: ['TECHNB', 'SCH_TECHNB', 'WN TECHNB']
+    };
   }
 
   /**
@@ -33,6 +44,8 @@ class RuleEngine {
         this.applyRule3_PMRates(correctedEntry, entryChanges);
         this.applyRule4_SundayPremium(correctedEntry, entryChanges);
         this.applyRule5_CallWork(correctedEntry, entryChanges);
+        this.applyRule6_NoBillDetection(correctedEntry, entryChanges);  // NEW
+        this.applyRule7_OfficeOverride(correctedEntry, entryChanges);   // NEW
         
         correctedData.push(correctedEntry);
         changes.push(...entryChanges);
@@ -170,105 +183,6 @@ class RuleEngine {
   }
 
   /**
-   * Rule 5: Call pay type requires TechOT labor rate
+   * Rule 5: ENHANCED - Call pay type with No Bill logic and branch-appropriate rates
    */
-  applyRule5_CallWork(entry, changes) {
-    if (entry.payType === 'Call' && entry.laborRate !== 'TechOT') {
-      changes.push({
-        employeeName: entry.employeeName,
-        employeeId: entry.employeeId,
-        date: entry.date,
-        field: 'laborRate',
-        originalValue: entry.laborRate,
-        correctedValue: 'TechOT',
-        rule: 'Rule 5: Call Work Labor Rate',
-        description: 'Call pay type requires TechOT labor rate'
-      });
-      
-      entry.laborRate = 'TechOT';
-    }
-  }
-
-  /**
-   * Validate a single entry against all rules
-   */
-  validateEntry(entry) {
-    const issues = [];
-    
-    // Rule 1 validation
-    if (entry.costCategory === 'TechUnapplyd' && entry.payType !== 'Unapplied') {
-      issues.push('Cost Category is TechUnapplyd but Pay Type is not Unapplied');
-    }
-    
-    // Rule 2 validation
-    const costCode = entry.costCode?.toUpperCase();
-    if ((costCode === 'SERVICE' || costCode === 'INSTALL') && 
-        !this.SERVICE_INSTALL_LABOR_RATES.includes(entry.laborRate)) {
-      issues.push(`Service/Install work requires approved labor rate, got: ${entry.laborRate}`);
-    }
-    
-    // Rule 3 validation
-    if (['PM', 'PMF', 'FTPM'].includes(costCode) && 
-        !this.PM_LABOR_RATES.includes(entry.laborRate)) {
-      issues.push(`PM work requires approved labor rate, got: ${entry.laborRate}`);
-    }
-    
-    // Rule 4 validation
-    try {
-      const date = moment(entry.date, 'MM/DD/YYYY');
-      if (date.isValid() && date.day() === 0) {
-        if (entry.payType !== 'Double Time') {
-          issues.push('Sunday work requires Double Time pay type');
-        }
-        if (entry.laborRate !== 'PREM') {
-          issues.push('Sunday work requires PREM labor rate');
-        }
-      }
-    } catch (error) {
-      issues.push(`Invalid date format: ${entry.date}`);
-    }
-    
-    // Rule 5 validation
-    if (entry.payType === 'Call' && entry.laborRate !== 'TechOT') {
-      issues.push('Call work requires TechOT labor rate');
-    }
-    
-    return issues;
-  }
-
-  /**
-   * Get summary statistics for rules applied
-   */
-  getSummary(changes) {
-    const summary = {
-      totalChanges: changes.length,
-      changesByRule: {},
-      changesByEmployee: {},
-      changesByField: {}
-    };
-    
-    changes.forEach(change => {
-      // Count by rule
-      if (!summary.changesByRule[change.rule]) {
-        summary.changesByRule[change.rule] = 0;
-      }
-      summary.changesByRule[change.rule]++;
-      
-      // Count by employee
-      if (!summary.changesByEmployee[change.employeeName]) {
-        summary.changesByEmployee[change.employeeName] = 0;
-      }
-      summary.changesByEmployee[change.employeeName]++;
-      
-      // Count by field
-      if (!summary.changesByField[change.field]) {
-        summary.changesByField[change.field] = 0;
-      }
-      summary.changesByField[change.field]++;
-    });
-    
-    return summary;
-  }
-}
-
-module.exports = new RuleEngine();
+  applyRule5_CallWork

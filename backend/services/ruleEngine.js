@@ -183,6 +183,209 @@ class RuleEngine {
   }
 
   /**
-   * Rule 5: ENHANCED - Call pay type with No Bill logic and branch-appropriate rates
+   * Rule 5: Call pay type requires TechOT labor rate
    */
-  applyRule5_CallWork
+  applyRule5_CallWork(entry, changes) {
+    if (entry.payType === 'Call' && entry.laborRate !== 'TechOT') {
+      changes.push({
+        employeeName: entry.employeeName,
+        employeeId: entry.employeeId,
+        date: entry.date,
+        field: 'laborRate',
+        originalValue: entry.laborRate,
+        correctedValue: 'TechOT',
+        rule: 'Rule 5: Call Work Labor Rate',
+        description: 'Call pay type requires TechOT labor rate'
+      });
+      
+      entry.laborRate = 'TechOT';
+    }
+  }
+
+  /**
+   * Rule 6: NEW - No Bill Detection
+   * Scan description field for "No Bill" text and add NB suffix while preserving branch prefixes
+   * Examples: WN TECH → WN TECHNB, SCH_TECH → SCHTECHNB, Tech → TechNB
+   */
+  applyRule6_NoBillDetection(entry, changes) {
+    // Check if description contains "No Bill" (case insensitive)
+    if (entry.description && entry.description.toLowerCase().includes('no bill')) {
+      const currentRate = entry.laborRate;
+      let correctedRate = currentRate;
+      
+      // Skip if already has NB suffix
+      if (!currentRate || currentRate.toUpperCase().endsWith('NB')) {
+        return;
+      }
+      
+      // Handle branch-specific rates
+      if (currentRate.toUpperCase().startsWith('WN ')) {
+        // WN TECH → WN TECHNB, WN MN TECH → WN MN TECHNB
+        if (currentRate.toUpperCase() === 'WN TECH') {
+          correctedRate = 'WN TECHNB';
+        } else if (currentRate.toUpperCase() === 'WN MN TECH') {
+          correctedRate = 'WN MN TECHNB';
+        } else if (currentRate.toUpperCase() === 'WN PM TECH') {
+          correctedRate = 'WN PM TECHNB';
+        }
+      } else if (currentRate.toUpperCase().startsWith('SCH')) {
+        // SCH_TECH → SCHTECHNB, SCH_MNTECH → SCH_MNTECHNB
+        if (currentRate.toUpperCase() === 'SCH_TECH') {
+          correctedRate = 'SCHTECHNB';
+        } else if (currentRate.toUpperCase() === 'SCH_MNTECH') {
+          correctedRate = 'SCH_MNTECHNB';
+        } else if (currentRate.toUpperCase() === 'SCH_PMTECH') {
+          correctedRate = 'SCH_PMTECHNB';
+        }
+      } else if (currentRate.toUpperCase() === 'TECH') {
+        // Tech → TechNB
+        correctedRate = 'TechNB';
+      } else if (currentRate.toUpperCase() === 'MNTECH') {
+        // MNTech → MNTechNB
+        correctedRate = 'MNTechNB';
+      } else if (currentRate.toUpperCase() === 'PMTECH') {
+        // PMTECH → PMTECHNB
+        correctedRate = 'PMTECHNB';
+      } else if (currentRate.toUpperCase() === 'MN PMTECH') {
+        // MN PMTECH → MN PMTECHNB
+        correctedRate = 'MN PMTECHNB';
+      }
+      
+      // Apply change if rate was modified
+      if (correctedRate !== currentRate) {
+        changes.push({
+          employeeName: entry.employeeName,
+          employeeId: entry.employeeId,
+          date: entry.date,
+          field: 'laborRate',
+          originalValue: currentRate,
+          correctedValue: correctedRate,
+          rule: 'Rule 6: No Bill Detection',
+          description: 'Description contains "No Bill" - adding NB suffix to labor rate'
+        });
+        
+        entry.laborRate = correctedRate;
+      }
+    }
+  }
+
+  /**
+   * Rule 7: NEW - Office Override
+   * Office cost codes (1COAD, 1SCHOF, 1WNOF) always get "Regular" pay type
+   */
+  applyRule7_OfficeOverride(entry, changes) {
+    const costCode = entry.costCode?.toUpperCase();
+    
+    // Check if cost code is an office code
+    if (this.OFFICE_COST_CODES.includes(costCode) && entry.payType !== 'Regular') {
+      changes.push({
+        employeeName: entry.employeeName,
+        employeeId: entry.employeeId,
+        date: entry.date,
+        field: 'payType',
+        originalValue: entry.payType,
+        correctedValue: 'Regular',
+        rule: 'Rule 7: Office Override',
+        description: `Office cost code ${costCode} requires Regular pay type`
+      });
+      
+      entry.payType = 'Regular';
+    }
+  }
+
+  /**
+   * Validate a single entry against all rules
+   */
+  validateEntry(entry) {
+    const issues = [];
+    
+    // Rule 1 validation
+    if (entry.costCategory === 'TechUnapplyd' && entry.payType !== 'Unapplied') {
+      issues.push('Cost Category is TechUnapplyd but Pay Type is not Unapplied');
+    }
+    
+    // Rule 2 validation
+    const costCode = entry.costCode?.toUpperCase();
+    if ((costCode === 'SERVICE' || costCode === 'INSTALL') && 
+        !this.SERVICE_INSTALL_LABOR_RATES.includes(entry.laborRate)) {
+      issues.push(`Service/Install work requires approved labor rate, got: ${entry.laborRate}`);
+    }
+    
+    // Rule 3 validation
+    if (['PM', 'PMF', 'FTPM'].includes(costCode) && 
+        !this.PM_LABOR_RATES.includes(entry.laborRate)) {
+      issues.push(`PM work requires approved labor rate, got: ${entry.laborRate}`);
+    }
+    
+    // Rule 4 validation
+    try {
+      const date = moment(entry.date, 'MM/DD/YYYY');
+      if (date.isValid() && date.day() === 0) {
+        if (entry.payType !== 'Double Time') {
+          issues.push('Sunday work requires Double Time pay type');
+        }
+        if (entry.laborRate !== 'PREM') {
+          issues.push('Sunday work requires PREM labor rate');
+        }
+      }
+    } catch (error) {
+      issues.push(`Invalid date format: ${entry.date}`);
+    }
+    
+    // Rule 5 validation
+    if (entry.payType === 'Call' && entry.laborRate !== 'TechOT') {
+      issues.push('Call work requires TechOT labor rate');
+    }
+    
+    // Rule 6 validation - NEW
+    if (entry.description && entry.description.toLowerCase().includes('no bill')) {
+      const currentRate = entry.laborRate;
+      if (currentRate && !currentRate.toUpperCase().endsWith('NB')) {
+        issues.push('Description contains "No Bill" but labor rate lacks NB suffix');
+      }
+    }
+    
+    // Rule 7 validation - NEW
+    if (this.OFFICE_COST_CODES.includes(costCode) && entry.payType !== 'Regular') {
+      issues.push(`Office cost code ${costCode} requires Regular pay type`);
+    }
+    
+    return issues;
+  }
+
+  /**
+   * Get summary statistics for rules applied
+   */
+  getSummary(changes) {
+    const summary = {
+      totalChanges: changes.length,
+      changesByRule: {},
+      changesByEmployee: {},
+      changesByField: {}
+    };
+    
+    changes.forEach(change => {
+      // Count by rule
+      if (!summary.changesByRule[change.rule]) {
+        summary.changesByRule[change.rule] = 0;
+      }
+      summary.changesByRule[change.rule]++;
+      
+      // Count by employee
+      if (!summary.changesByEmployee[change.employeeName]) {
+        summary.changesByEmployee[change.employeeName] = 0;
+      }
+      summary.changesByEmployee[change.employeeName]++;
+      
+      // Count by field
+      if (!summary.changesByField[change.field]) {
+        summary.changesByField[change.field] = 0;
+      }
+      summary.changesByField[change.field]++;
+    });
+    
+    return summary;
+  }
+}
+
+module.exports = new RuleEngine();

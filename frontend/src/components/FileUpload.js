@@ -1,7 +1,9 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 
 const FileUpload = ({ onFileUpload, disabled }) => {
+  const fileInputRef = useRef(null);
+  
   const onDrop = useCallback((acceptedFiles) => {
     const file = acceptedFiles[0];
     if (file && file.type === 'application/pdf') {
@@ -11,13 +13,14 @@ const FileUpload = ({ onFileUpload, disabled }) => {
     }
   }, [onFileUpload]);
 
-  const { getRootProps, getInputProps, isDragActive, isDragAccept, isDragReject } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, isDragAccept, isDragReject, open } = useDropzone({
     onDrop,
     accept: {
       'application/pdf': ['.pdf']
     },
     maxFiles: 1,
-    disabled
+    disabled,
+    noClick: false
   });
 
   const getDropzoneClassName = () => {
@@ -59,6 +62,21 @@ const FileUpload = ({ onFileUpload, disabled }) => {
               <p className="secondary">Only PDF files are accepted</p>
             </div>
           )}
+          
+          <div className="upload-button-container">
+            <button 
+              type="button" 
+              className="btn btn-upload"
+              onClick={(e) => {
+                e.stopPropagation();
+                open();
+              }}
+              disabled={disabled}
+            >
+              File Upload
+            </button>
+            <p className="upload-button-text">Upload Payroll PDF Here</p>
+          </div>
         </div>
       </div>
 

@@ -180,6 +180,18 @@ body {
   font-size: 1rem;
 }
 
+.upload-button-container {
+  margin-top: 24px;
+  text-align: center;
+}
+
+.upload-button-text {
+  color: white;
+  font-size: 1rem;
+  margin-top: 12px;
+  font-weight: 500;
+}
+
 .file-input {
   position: absolute;
   top: 0;
@@ -618,6 +630,19 @@ body {
 
 .btn-success:hover {
   box-shadow: 0 6px 20px rgba(5, 150, 105, 0.4);
+}
+
+.btn-upload {
+  background: white;
+  color: #1e293b;
+  box-shadow: 0 4px 14px 0 rgba(255, 255, 255, 0.39);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn-upload:hover {
+  background: #f8f8f8;
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
 }
 
 .btn:disabled {

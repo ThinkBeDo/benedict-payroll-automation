@@ -5,13 +5,27 @@ class RuleEngine {
   constructor() {
     // Define allowed labor rates for different cost codes
     this.SERVICE_INSTALL_LABOR_RATES = [
-      'Tech', 'TechNB', 'MNTech', 'SCH_MNTECH', 'SCH_TECH', 
-      'SCHTECHNB', 'WN MN TECH', 'WN TECH', 'WN TECHNB'
+      // Regular rates
+      'Tech', 'TechNB', 'MNTech', 'MN TECH', 'SCH_MNTECH', 'SCH_TECH', 
+      'SCHTECHNB', 'WN MN TECH', 'WN TECH', 'WN TECHNB',
+      
+      // Overtime rates (valid for Call/Overtime pay types)
+      'TechOT', 'TECHOT', 'MNTECHOT', 'MN TECHOT', 'SCH_TECHOT', 
+      'SCH_MNTECHOT', 'WN TECHOT', 'WN MN TECHOT', 'WN MNTECHOT',
+      
+      // Helper rates
+      'HELPER', 'MN HELPER', 'SCH_HELPER', 'WN HELPER',
+      'HELPEROT', 'MN HELPEROT', 'SCH_HELPEROT', 'WN HELPEROT',
+      'HELPOT', 'MN HELPOT', 'SCH_HELPOT', 'WN HELPOT',
+      
+      // Shop rates (appear in data)
+      'SHOP', 'SCH_SHOP', 'WN SHOP'
     ];
     
     this.PM_LABOR_RATES = [
       'MN PMTECH', 'PMTECH', 'TechNB', 'Sch MN PM Tech', 
-      'SCH_MN PMTECH', 'SCH_PMTECH', 'WN MN PM TECH', 'WN PM TECH'
+      'SCH_MN PMTECH', 'SCH_PMTECH', 'WN MN PM TECH', 'WN PM TECH',
+      'WN PMTECH', 'PM TECH LABOR'
     ];
 
     // NEW: Office cost codes for Rule 7
@@ -160,20 +174,32 @@ class RuleEngine {
           entry.payType = 'Double Time';
         }
         
-        // Change labor rate to PREM
-        if (entry.laborRate !== 'PREM') {
+        // Change labor rate to PREM (preserve geographic prefix)
+        if (!entry.laborRate || !entry.laborRate.toUpperCase().includes('PREM')) {
+          let correctedRate = 'PREM';
+          
+          // Preserve geographic prefixes
+          const currentRate = entry.laborRate ? entry.laborRate.toUpperCase() : '';
+          if (currentRate.startsWith('WN ')) {
+            correctedRate = 'WN PREM';
+          } else if (currentRate.startsWith('SCH_') || currentRate.startsWith('SCH ')) {
+            correctedRate = 'SCH PREM';
+          } else if (currentRate.startsWith('MN ') || currentRate.startsWith('MNTECH')) {
+            correctedRate = 'MN PREM';
+          }
+          
           changes.push({
             employeeName: entry.employeeName,
             employeeId: entry.employeeId,
             date: entry.date,
             field: 'laborRate',
             originalValue: entry.laborRate,
-            correctedValue: 'PREM',
+            correctedValue: correctedRate,
             rule: 'Rule 4: Sunday Premium Rate',
             description: 'Work on Sunday requires PREM labor rate'
           });
           
-          entry.laborRate = 'PREM';
+          entry.laborRate = correctedRate;
         }
       }
       
@@ -183,22 +209,60 @@ class RuleEngine {
   }
 
   /**
-   * Rule 5: Call pay type requires TechOT labor rate
+   * Rule 5: Call pay type requires TechOT labor rate (preserve geographic prefix)
    */
   applyRule5_CallWork(entry, changes) {
-    if (entry.payType === 'Call' && entry.laborRate !== 'TechOT') {
-      changes.push({
-        employeeName: entry.employeeName,
-        employeeId: entry.employeeId,
-        date: entry.date,
-        field: 'laborRate',
-        originalValue: entry.laborRate,
-        correctedValue: 'TechOT',
-        rule: 'Rule 5: Call Work Labor Rate',
-        description: 'Call pay type requires TechOT labor rate'
-      });
+    if (entry.payType === 'Call') {
+      const currentRate = entry.laborRate ? entry.laborRate.toUpperCase() : '';
       
-      entry.laborRate = 'TechOT';
+      // Skip if already has OT suffix
+      if (currentRate.includes('OT')) {
+        return;
+      }
+      
+      let correctedRate = 'TechOT';
+      
+      // Preserve geographic prefixes
+      if (currentRate.startsWith('WN MN ')) {
+        correctedRate = 'WN MN TECHOT';
+      } else if (currentRate.startsWith('WN ')) {
+        correctedRate = 'WN TECHOT';
+      } else if (currentRate.startsWith('SCH_MN')) {
+        correctedRate = 'SCH_MNTECHOT';
+      } else if (currentRate.startsWith('SCH_') || currentRate.startsWith('SCH ')) {
+        correctedRate = 'SCH_TECHOT';
+      } else if (currentRate.startsWith('MN ') || currentRate === 'MNTECH') {
+        correctedRate = 'MN TECHOT';
+      } else if (currentRate === 'TECH') {
+        correctedRate = 'TechOT';
+      } else if (currentRate.includes('HELPER')) {
+        // Handle helper rates
+        if (currentRate.startsWith('WN ')) {
+          correctedRate = 'WN HELPEROT';
+        } else if (currentRate.startsWith('SCH')) {
+          correctedRate = 'SCH_HELPEROT';
+        } else if (currentRate.startsWith('MN ')) {
+          correctedRate = 'MN HELPEROT';
+        } else {
+          correctedRate = 'HELPEROT';
+        }
+      }
+      
+      // Only apply change if rate needs correction
+      if (entry.laborRate !== correctedRate) {
+        changes.push({
+          employeeName: entry.employeeName,
+          employeeId: entry.employeeId,
+          date: entry.date,
+          field: 'laborRate',
+          originalValue: entry.laborRate,
+          correctedValue: correctedRate,
+          rule: 'Rule 5: Call Work Labor Rate',
+          description: 'Call pay type requires overtime labor rate'
+        });
+        
+        entry.laborRate = correctedRate;
+      }
     }
   }
 
@@ -324,7 +388,8 @@ class RuleEngine {
         if (entry.payType !== 'Double Time') {
           issues.push('Sunday work requires Double Time pay type');
         }
-        if (entry.laborRate !== 'PREM') {
+        const currentRate = entry.laborRate ? entry.laborRate.toUpperCase() : '';
+        if (!currentRate.includes('PREM')) {
           issues.push('Sunday work requires PREM labor rate');
         }
       }
@@ -333,8 +398,11 @@ class RuleEngine {
     }
     
     // Rule 5 validation
-    if (entry.payType === 'Call' && entry.laborRate !== 'TechOT') {
-      issues.push('Call work requires TechOT labor rate');
+    if (entry.payType === 'Call') {
+      const currentRate = entry.laborRate ? entry.laborRate.toUpperCase() : '';
+      if (!currentRate.includes('OT')) {
+        issues.push('Call work requires overtime labor rate');
+      }
     }
     
     // Rule 6 validation - NEW

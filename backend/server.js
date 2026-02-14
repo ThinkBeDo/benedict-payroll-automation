@@ -7,12 +7,20 @@ const payrollRoutes = require('./routes/payroll');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const isProduction = process.env.NODE_ENV === 'production';
+const maxRequestBodySize = process.env.MAX_REQUEST_BODY_SIZE || '15mb';
 
-// Trust proxy for Railway deployment
-app.set('trust proxy', true);
+function parseIntWithDefault(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+// Railway is typically one proxy hop away; do not use permissive "true".
+const trustProxyHops = parseIntWithDefault(process.env.TRUST_PROXY_HOPS || '1', 1);
+app.set('trust proxy', isProduction ? trustProxyHops : false);
 
 // Security middleware with custom CSP for production
-if (process.env.NODE_ENV === 'production') {
+if (isProduction) {
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -36,7 +44,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
+  origin: isProduction
     ? process.env.FRONTEND_URL || true
     : 'http://localhost:3000',
   credentials: true
@@ -44,17 +52,19 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: parseIntWithDefault(process.env.RATE_LIMIT_WINDOW_MS || '900000', 900000),
+  max: parseIntWithDefault(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 100),
+  standardHeaders: true,
+  legacyHeaders: false
 });
 app.use(limiter);
 
 // Body parsing middleware
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: maxRequestBodySize }));
+app.use(express.urlencoded({ extended: true, limit: maxRequestBodySize }));
 
 // Serve static files from the React app build
-if (process.env.NODE_ENV === 'production') {
+if (isProduction) {
   app.use(express.static(path.join(__dirname, '../frontend/build')));
 }
 
@@ -71,7 +81,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Serve React app for all other routes (production only)
-if (process.env.NODE_ENV === 'production') {
+if (isProduction) {
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
   });
@@ -98,10 +108,45 @@ app.use((req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 API: http://localhost:${PORT}/api/health`);
+});
+
+let isShuttingDown = false;
+const shutdown = (signal) => {
+  if (isShuttingDown) {
+    return;
+  }
+  isShuttingDown = true;
+
+  console.log(`${signal} received. Closing server gracefully...`);
+
+  server.close((error) => {
+    if (error) {
+      console.error('Error during server shutdown:', error);
+      process.exit(1);
+    }
+
+    console.log('Server closed cleanly.');
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.error('Forced shutdown after 10 seconds.');
+    process.exit(1);
+  }, 10000).unref();
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  shutdown('uncaughtException');
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
 });
 
 module.exports = app;

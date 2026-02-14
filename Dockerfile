@@ -10,15 +10,15 @@ COPY backend/package*.json ./backend/
 COPY frontend/package*.json ./frontend/
 
 # Install dependencies
-RUN npm install
-RUN cd backend && npm install
-RUN cd frontend && npm install
+RUN npm ci
+RUN npm --prefix backend ci
+RUN npm --prefix frontend ci
 
 # Copy source code
 COPY . .
 
 # Build frontend
-RUN cd frontend && npm run build
+RUN npm --prefix frontend run build
 
 # Expose port
 EXPOSE 5000
@@ -28,4 +28,4 @@ ENV NODE_ENV=production
 ENV PORT=5000
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["npm", "run", "start"]

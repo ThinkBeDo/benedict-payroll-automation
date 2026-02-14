@@ -145,6 +145,10 @@ The application is configured for Railway deployment with automatic environment 
 # Backend
 NODE_ENV=production
 PORT=5000
+TRUST_PROXY_HOPS=1
+MAX_REQUEST_BODY_SIZE=15mb
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
 
 # Frontend
 REACT_APP_API_URL=https://your-api-domain.com/api
@@ -152,11 +156,14 @@ REACT_APP_API_URL=https://your-api-domain.com/api
 
 ### Build for Production
 ```bash
-# Build frontend
-cd frontend && npm run build
+# Install dependencies once during build
+npm run install-all
 
-# Start production server
-cd backend && npm start
+# Build frontend bundle
+npm run build
+
+# Start production server (no runtime install)
+npm run start
 ```
 
 ## 📊 API Endpoints
